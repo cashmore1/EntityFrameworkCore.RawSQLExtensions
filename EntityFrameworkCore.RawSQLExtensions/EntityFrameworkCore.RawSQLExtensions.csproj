@@ -14,7 +14,6 @@
     <Version>1.1.3</Version>
     <Copyright>Copyright ©2019 Paul Roy</Copyright>
     <PackageTags>entity framework entityframework core raw sql procedure query efcore</PackageTags>
-    <PackageIcon>nuget_icon.png</PackageIcon>
     <RepositoryType>Integrating maikebing pull request</RepositoryType>
   </PropertyGroup>
 
