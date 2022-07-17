@@ -12,9 +12,10 @@
     <Description>Extensions to support raw SQL and stored procedures with custom entities mapping</Description>
     <PackageLicenseFile>LICENSE</PackageLicenseFile>
     <Version>1.1.4</Version>
-    <Copyright>Copyright ©2019 Paul Roy</Copyright>
+    <Copyright></Copyright>
     <PackageTags>entity framework entityframework core raw sql procedure query efcore</PackageTags>
     <RepositoryType></RepositoryType>
+    <AssemblyName>EntityFrameworkCore.SqlExtensions</AssemblyName>
   </PropertyGroup>
 
   
