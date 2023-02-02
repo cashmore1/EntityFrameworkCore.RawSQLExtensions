@@ -1,5 +1,7 @@
-﻿using System;
+﻿using EntityFrameworkCore.RawSQLExtensions.Options;
+using System;
 using System.Collections.Generic;
+using System.ComponentModel.DataAnnotations.Schema;
 using System.Data;
 using System.Data.Common;
 using System.Linq;
@@ -17,14 +19,14 @@ namespace EntityFrameworkCore.RawSQLExtensions.Extensions
             {
                 var props = typeof(T).GetRuntimeFields();
                 valuePairs = dr.GetColumnSchema()          
-               .ToDictionary(key => key.ColumnName.ToLower());
+                               .ToDictionary(key => key.ColumnName.ToLower());
             }
            else
             {
-                var props = typeof(T).GetRuntimeProperties();
+                var props = GetRuntimeProperties<T>();
                 valuePairs = dr.GetColumnSchema()
-               .Where(x => props.Any(y => y.Name.ToLower() == x.ColumnName.ToLower()))
-               .ToDictionary(key => key.ColumnName.ToLower());
+                               .Where(x => props.Any(y => y.Name.ToLower() == x.ColumnName.ToLower()))
+                               .ToDictionary(key => key.ColumnName.ToLower());
             }
             return valuePairs;
         }
@@ -33,7 +35,16 @@ namespace EntityFrameworkCore.RawSQLExtensions.Extensions
         {
             if (typeof(T).IsSqlSimpleType())
             {
-                return (T)dr.GetValue(0);
+                var dbValue = dr.GetValue(0);
+
+                if (RawSQLExtensionsOptions.AllowStringGuidConversion && 
+                    typeof(T) == typeof(Guid) && dbValue is string dbStringValue)
+                {
+                    object obj = new Guid(dbStringValue); // case when db is string and property is Guid
+                    return (T)obj;
+                }
+
+                return (T)dbValue;
             }
             else
             {
@@ -48,18 +59,34 @@ namespace EntityFrameworkCore.RawSQLExtensions.Extensions
                         var val = Convert.ChangeType(dr.GetValue(i), fields[i].FieldType);
                        fields[i].SetValue(xobj, val == DBNull.Value ? null : val);
                     }
-                    obj = (T)Convert.ChangeType( xobj,typeof(T));
+                    obj = (T)Convert.ChangeType(xobj, typeof(T));
                 }
                 else
                 {
-                    IEnumerable<PropertyInfo> props = typeof(T).GetRuntimeProperties();
+                    IEnumerable<PropertyInfo> props = GetRuntimeProperties<T>();
                     foreach (var prop in props)
                     {
+
                         var propName = prop.Name.ToLower();
                         if (colMapping.ContainsKey(propName))
                         {
-                            var val = dr.GetValue(colMapping[prop.Name.ToLower()].ColumnOrdinal.Value);
-                            prop.SetValue(obj, val == DBNull.Value ? null : val);
+                            var dbValue = dr.GetValue(colMapping[prop.Name.ToLower()].ColumnOrdinal.Value);
+
+                            var type = Nullable.GetUnderlyingType(prop.PropertyType);
+                            if (type != null && type.IsEnum)
+                            {
+                                dbValue = dbValue == DBNull.Value ? null : Enum.ToObject(type, dbValue);
+                            }
+
+                            if (RawSQLExtensionsOptions.AllowStringGuidConversion && 
+                                prop.PropertyType == typeof(Guid) && dbValue is string dbStringValue)
+                            {
+                                prop.SetValue(obj, new Guid(dbStringValue)); // case when db is string and property is Guid
+                            }
+                            else
+                            {
+                                prop.SetValue(obj, dbValue == DBNull.Value ? null : dbValue);
+                            }
                         }
                         else
                         {
@@ -146,7 +173,7 @@ namespace EntityFrameworkCore.RawSQLExtensions.Extensions
                 while (await dr.ReadAsync())
                     return dr.MapObject<T>(colMapping);
 
-            return default(T);
+            return default;
         }
 
         public static T FirstOrDefault<T>(this DbDataReader dr)
@@ -156,14 +183,14 @@ namespace EntityFrameworkCore.RawSQLExtensions.Extensions
                 while (dr.Read())
                     return dr.MapObject<T>(colMapping);
 
-            return default(T);
+            return default;
         }
 
         public static async Task<T> SingleOrDefaultAsync<T>(this DbDataReader dr)
         {
             var colMapping = dr.GetSchema<T>();
 
-            T obj = default(T);
+            T obj = default;
             bool hasResult = false;
 
             if (dr.HasRows)
@@ -182,7 +209,7 @@ namespace EntityFrameworkCore.RawSQLExtensions.Extensions
         public static T SingleOrDefault<T>(this DbDataReader dr)
         {
             var colMapping = dr.GetSchema<T>();
-            T obj = default(T);
+            T obj = default;
             bool hasResult = false;
 
             if (dr.HasRows)
@@ -196,6 +223,13 @@ namespace EntityFrameworkCore.RawSQLExtensions.Extensions
                 }
 
             return obj;
+        }
+
+        private static IEnumerable<PropertyInfo> GetRuntimeProperties<T>()
+        {
+            var props = typeof(T).GetRuntimeProperties();
+            return props.Where(p => !p.CustomAttributes.Any(ca => ca.AttributeType == typeof(NotMappedAttribute)))
+                                     .ToList();
         }
     }
 }
