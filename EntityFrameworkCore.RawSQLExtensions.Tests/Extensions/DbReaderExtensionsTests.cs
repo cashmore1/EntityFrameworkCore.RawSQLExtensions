@@ -1,8 +1,10 @@
 ﻿using EntityFrameworkCore.RawSQLExtensions.Extensions;
+using EntityFrameworkCore.RawSQLExtensions.Options;
 using FakeItEasy;
 using NUnit.Framework;
 using System;
 using System.Collections.ObjectModel;
+using System.ComponentModel.DataAnnotations.Schema;
 using System.Data.Common;
 using System.Reflection;
 namespace EntityFrameworkCore.RawSQLExtensions.Tests.Extensions
@@ -26,6 +28,19 @@ namespace EntityFrameworkCore.RawSQLExtensions.Tests.Extensions
     public class ComplexClassWithAdditionalProperty : ComplexClass
     {
         public string AdditionalProperty { get; set; }
+    }
+
+    public class NotMappedPropertyClass
+    {
+        public string firstProperty { get; set; }
+
+        [NotMapped]
+        public string secondProperty { get; set; }
+    }
+
+    public class GuidParsingClass
+    {
+        public Guid guidProperty { get; set; }
     }
 
     [TestFixture]
@@ -83,6 +98,33 @@ namespace EntityFrameworkCore.RawSQLExtensions.Tests.Extensions
             Assert.AreEqual(instance, obj);
         }
 
+        [Test]
+        public void MapObjectWithGuidProperty()
+        {
+            RawSQLExtensionsOptions.AllowStringGuidConversion = true;
+
+            var dbReader = A.Fake<DbDataReader>();
+            var guid = Guid.NewGuid();
+            A.CallTo(() => dbReader.GetValue(0)).Returns(guid.ToString());
+
+            var obj = dbReader.MapObject<Guid>(null);
+
+            A.CallTo(() => dbReader.GetValue(0)).MustHaveHappened();
+            Assert.AreEqual(guid, obj);
+        }
+
+        [Test]
+        public void MapObjectWithGuidPropertyWithoutOptionThrows()
+        {
+            RawSQLExtensionsOptions.AllowStringGuidConversion = false;
+
+            var dbReader = A.Fake<DbDataReader>();
+            var guid = Guid.NewGuid();
+            A.CallTo(() => dbReader.GetValue(0)).Returns(guid.ToString());
+
+            Assert.Throws<InvalidCastException>(() => dbReader.MapObject<Guid>(null));
+        }
+
         #endregion
 
         #region "ToListAsync, FirstOrDefaultAsync, SingleOrDefaultAsync"
@@ -92,7 +134,6 @@ namespace EntityFrameworkCore.RawSQLExtensions.Tests.Extensions
         #endregion
 
         #endregion
-
 
         #region "Complex Type"
 
@@ -278,6 +319,63 @@ namespace EntityFrameworkCore.RawSQLExtensions.Tests.Extensions
             Assert.Throws<System.ArgumentException>(() => dbReader.MapObject<ComplexClass>(dbReader.GetSchema<ComplexClass>()));
         }
 
+        [Test]
+        public void MapObjectMapSkipNotMappedProperties()
+        {
+            var dbReader = A.Fake<DbDataReader>(opts => opts.Implements<IDbColumnSchemaGenerator>());
+            var dataColumn = new ReadOnlyCollection<DbColumn>(
+                new DbColumn[] {
+                    new CustomDbColumn(nameof(NotMappedPropertyClass.firstProperty).ToLower(), 0),
+                    new CustomDbColumn(nameof(NotMappedPropertyClass.secondProperty).ToLower(), 0),
+                });
+
+            A.CallTo(() => ((IDbColumnSchemaGenerator)dbReader).GetColumnSchema()).Returns(dataColumn);
+            A.CallTo(() => dbReader.GetValue(0)).Returns("string");
+
+            var obj = dbReader.MapObject<NotMappedPropertyClass>(dbReader.GetSchema<NotMappedPropertyClass>());
+            Assert.AreEqual("string", obj.firstProperty);
+            Assert.AreEqual(null, obj.secondProperty);
+        }
+
+        [Test]
+        public void MapClassWithGuidProperty()
+        {
+            RawSQLExtensionsOptions.AllowStringGuidConversion = true;
+
+            var dbReader = A.Fake<DbDataReader>(opts => opts.Implements<IDbColumnSchemaGenerator>());
+            var guid = Guid.NewGuid();
+            var dataColumn = new ReadOnlyCollection<DbColumn>(
+                new DbColumn[] {
+                    new CustomDbColumn(nameof(GuidParsingClass.guidProperty).ToLower(), 0),
+                });
+
+            A.CallTo(() => ((IDbColumnSchemaGenerator)dbReader).GetColumnSchema()).Returns(dataColumn);
+            A.CallTo(() => dbReader.GetValue(0)).Returns(guid.ToString());
+
+            var obj = dbReader.MapObject<GuidParsingClass>(dbReader.GetSchema<GuidParsingClass>());
+
+            A.CallTo(() => dbReader.GetValue(0)).MustHaveHappened();
+            Assert.AreEqual(guid, obj.guidProperty);
+        }
+
+        [Test]
+        public void MapClassWithGuidPropertyWithoutOptionThrows()
+        {
+            RawSQLExtensionsOptions.AllowStringGuidConversion = false;
+
+            var dbReader = A.Fake<DbDataReader>(opts => opts.Implements<IDbColumnSchemaGenerator>());
+            var guid = Guid.NewGuid();
+            var dataColumn = new ReadOnlyCollection<DbColumn>(
+                new DbColumn[] {
+                    new CustomDbColumn(nameof(GuidParsingClass.guidProperty).ToLower(), 0),
+                });
+
+            A.CallTo(() => ((IDbColumnSchemaGenerator)dbReader).GetColumnSchema()).Returns(dataColumn);
+            A.CallTo(() => dbReader.GetValue(0)).Returns(guid.ToString());
+
+            Assert.Throws<ArgumentException>(() => dbReader.MapObject<GuidParsingClass>(dbReader.GetSchema<GuidParsingClass>()));
+        }
+
         #endregion
 
         #region "ToListAsync, FirstOrDefaultAsync, SingleOrDefaultAsync"
@@ -286,7 +384,29 @@ namespace EntityFrameworkCore.RawSQLExtensions.Tests.Extensions
 
         #endregion
 
+        #region "Not Mapped Property"
+
+        [Test]
+        public void GetSchemaFromNotMappedClass()
+        {
+            var dbReader = A.Fake<DbDataReader>(opts => opts.Implements<IDbColumnSchemaGenerator>());
+            var dataColumn = new ReadOnlyCollection<DbColumn>(
+                new DbColumn[] {
+                    new CustomDbColumn(nameof(NotMappedPropertyClass.firstProperty)),
+                    new CustomDbColumn(nameof(NotMappedPropertyClass.secondProperty)),
+                });
+            A.CallTo(() => ((IDbColumnSchemaGenerator)dbReader).GetColumnSchema()).Returns(dataColumn);
+
+            var schema = dbReader.GetSchema<NotMappedPropertyClass>();
+            Assert.IsTrue(schema.ContainsKey(nameof(NotMappedPropertyClass.firstProperty).ToLower()));
+            Assert.IsFalse(schema.ContainsKey(nameof(NotMappedPropertyClass.secondProperty).ToLower()));
+            Assert.AreEqual(schema.Keys.Count, 1);
+        }
+
         #endregion
+
+        #endregion
+
         [Test]
         public void  ReadValueFromTulp()
         {
